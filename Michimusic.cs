@@ -9,33 +9,48 @@ namespace ReproductorMusical
 {
     public partial class Michimusic : Form
     {
-        private readonly Color cremaRetro = Color.FromArgb(245, 230, 189);
-        private readonly Color mostazaSuave = Color.FromArgb(223, 160, 93);
-        private readonly Color rojoLadrillo = Color.FromArgb(172, 80, 69);
-        private readonly Color verdeVintage = Color.FromArgb(101, 135, 97);
-        private readonly Color azulPetroleo = Color.FromArgb(2, 108, 128);
-        private readonly Color negroSuave = Color.FromArgb(26, 31, 37);
-        private readonly Color amarilloRetro = Color.FromArgb(249, 162, 4);
+        // ── Datos de canciones y timers ───────────────────────────────────────────
+        private readonly List<string> canciones         = new List<string>();
+        private readonly Timer        timerReproduccion = new Timer();
+        private readonly Timer        timerAnimacion    = new Timer();
 
-        private readonly List<string> canciones = new List<string>();
-        private readonly Timer timerReproduccion = new Timer();
-        private readonly Timer timerAnimacion = new Timer();
-        private readonly Random aleatorio = new Random();
-        private readonly List<ParticulaVisual> particulas = new List<ParticulaVisual>();
-
+        // ── Reproductor ───────────────────────────────────────────────────────────
         private dynamic reproductor;
-        private bool reproductorDisponible;
-        private int indiceCancionActual = -1;
-        private int duracionActualMs;
-        private bool cancionAbierta;
-        private bool reproduciendo;
-        private bool enPausa;
-        private float faseAnimacion;
-        private float[] muestrasAudio = new float[0];
-        private float[] bandasAudio = new float[32];
-        private int frecuenciaMuestreo = 44100;
-        private bool analisisAudioDisponible;
+        private bool    reproductorDisponible;
+        private bool    cancionAbierta;
+        private bool    reproduciendo;
+        private bool    enPausa;
+        private int     duracionActualMs;
+        private int     indiceCancionActual = -1;
 
+        // ── Animación y volumen ───────────────────────────────────────────────────
+        private float faseAnimacion;
+        private int   modoVisualActual;
+        private int   volumenValor = 50;
+
+        // ── Beat detection ────────────────────────────────────────────────────────
+        private float energiaAnterior;
+        private int   p_beatCooldown;
+
+        // ── Subsistemas de audio y visualización ──────────────────────────────────
+        private readonly AnalizadorAudio       analizador = new AnalizadorAudio();
+        private readonly ContextoVisualizacion contexto   = new ContextoVisualizacion();
+        private VisualizadorBase               visualizadorActual;
+
+        // ── Contexto compartido para los graficadores de UI ───────────────────────
+        private readonly ContextoUI contextoUI = new ContextoUI();
+
+        // ── Clases de graficado de paneles ────────────────────────────────────────
+        private GraficoBotones        graficoBotones;
+        private GraficoHeader         graficoHeader;
+        private GraficoFooter         graficoFooter;
+        private GraficoProgreso       graficoProgreso;
+        private GraficoVolumen        graficoVolumen;
+        private GraficoLista          graficoLista;
+        private GraficoMarco          graficoMarco;
+        private GraficoSelectorVisual graficoSelectorVisual;
+
+        // ─────────────────────────────────────────────────────────────────────────
         public Michimusic()
         {
             InitializeComponent();
@@ -53,60 +68,54 @@ namespace ReproductorMusical
 
         private void InicializarInterfaz()
         {
+            contexto.Analizador   = analizador;
+            contextoUI.Canciones  = canciones;
+            contextoUI.IndiceCancionActual = -1;
+            contextoUI.VolumenValor        = volumenValor;
+
+            graficoBotones        = new GraficoBotones(contextoUI);
+            graficoHeader         = new GraficoHeader(contextoUI);
+            graficoFooter         = new GraficoFooter(contextoUI);
+            graficoProgreso       = new GraficoProgreso(contextoUI);
+            graficoVolumen        = new GraficoVolumen(contextoUI);
+            graficoLista          = new GraficoLista(contextoUI);
+            graficoMarco          = new GraficoMarco(contextoUI);
+            graficoSelectorVisual = new GraficoSelectorVisual(contextoUI);
+
             ConfigurarEstilos();
             ConfigurarPanelVisualizador();
             ConfigurarReproductor();
-
-            cmbModoVisual.SelectedIndex = 0;
-            trackVolumen.Value = 50;
+            ActualizarModoVisual(0);
             ActualizarVolumen();
             CargarCancionesDesdeCarpeta();
         }
 
+        // ── Configuración de estilos ──────────────────────────────────────────────
         private void ConfigurarEstilos()
         {
-            BackColor = cremaRetro;
+            graficoBotones.AplicarEstiloBotonRetro(btnCargar,    "▲",   "C A R G A R");
+            graficoBotones.AplicarEstiloBotonRetro(btnAnterior,  "|◀◀", "R E W");
+            graficoBotones.AplicarEstiloBotonRetro(btnPlay,      "▶",   "P L A Y");
+            graficoBotones.AplicarEstiloBotonRetro(btnPause,     "‖",   "P A U S E");
+            graficoBotones.AplicarEstiloBotonRetro(btnStop,      "■",   "S T O P");
+            graficoBotones.AplicarEstiloBotonRetro(btnSiguiente, "▶▶|", "F . F .");
 
-            panelHeader.BackColor = Color.FromArgb(122, 38, 28);
-            panelSelectorVisual.BackColor = cremaRetro;
-            panelListaCanciones.BackColor = negroSuave;
-            panelControles.BackColor = cremaRetro;
-            panelFooter.BackColor = negroSuave;
-            panelMarcoVisualizador.BackColor = negroSuave;
-            panelVisualizador.BackColor = Color.FromArgb(1, 82, 98);
+            contextoUI.ModoActivo = btnModoBarras;
+            graficoBotones.AplicarEstiloBotonModo(btnModoBarras,     "BARRAS");
+            graficoBotones.AplicarEstiloBotonModo(btnModoOnda,       "ONDA");
+            graficoBotones.AplicarEstiloBotonModo(btnModoParticulas, "PARTIC.");
+            graficoBotones.AplicarEstiloBotonModo(btnModoFiguras,    "FIGURAS");
+            graficoBotones.AplicarEstiloBotonModo(btnModoCircular,   "CIRC.");
+        }
 
-            lblTitulo.ForeColor = cremaRetro;
-            lblSubtitulo.ForeColor = Color.FromArgb(255, 218, 151);
-            lblModoVisual.ForeColor = negroSuave;
-            lblListaCanciones.ForeColor = cremaRetro;
-            lblVolumen.ForeColor = negroSuave;
-            lblTiempo.ForeColor = negroSuave;
-            lblCancionActual.ForeColor = cremaRetro;
-            lblEstado.ForeColor = cremaRetro;
-
-            picLogo.BackColor = cremaRetro;
-            picLogo.BorderStyle = BorderStyle.FixedSingle;
-
-            CrearBotonPixel(btnCargar, mostazaSuave, amarilloRetro);
-            CrearBotonPixel(btnAnterior, azulPetroleo, Color.FromArgb(5, 132, 154));
-            CrearBotonPixel(btnPlay, verdeVintage, Color.FromArgb(120, 156, 112));
-            CrearBotonPixel(btnPause, amarilloRetro, mostazaSuave);
-            CrearBotonPixel(btnStop, rojoLadrillo, Color.FromArgb(191, 94, 82));
-            CrearBotonPixel(btnSiguiente, azulPetroleo, Color.FromArgb(5, 132, 154));
-
-            btnAnterior.ForeColor = cremaRetro;
-            btnPlay.ForeColor = cremaRetro;
-            btnStop.ForeColor = cremaRetro;
-            btnSiguiente.ForeColor = cremaRetro;
-            cmbModoVisual.BackColor = Color.FromArgb(255, 241, 204);
-            cmbModoVisual.ForeColor = negroSuave;
-            lstCanciones.BackColor = Color.FromArgb(255, 241, 204);
-            lstCanciones.ForeColor = negroSuave;
-            lstCanciones.HorizontalScrollbar = true;
-            lstCancionesMp3.BackColor = Color.FromArgb(255, 241, 204);
-            lstCancionesMp3.ForeColor = negroSuave;
-            lstCancionesMp3.HorizontalScrollbar = true;
-            lblListaMp3.ForeColor = cremaRetro;
+        private void ConfigurarPanelVisualizador()
+        {
+            ActivarDobleBuffer(panelVisualizador);
+            ActivarDobleBuffer(panelVolumen);
+            ActivarDobleBuffer(panelFooter);
+            panelVisualizador.Paint  += panelVisualizador_Paint;
+            panelVisualizador.Resize += panelVisualizador_Resize;
+            panelMarcoVisualizador.Invalidate();
         }
 
         private void ConfigurarReproductor()
@@ -114,35 +123,34 @@ namespace ReproductorMusical
             CrearReproductorWindowsMedia();
 
             timerReproduccion.Interval = 250;
-            timerReproduccion.Tick += timerReproduccion_Tick;
+            timerReproduccion.Tick    += timerReproduccion_Tick;
 
             timerAnimacion.Interval = 33;
-            timerAnimacion.Tick += timerAnimacion_Tick;
+            timerAnimacion.Tick    += timerAnimacion_Tick;
             timerAnimacion.Start();
 
-            btnCargar.Click += btnCargar_Click;
-            btnAnterior.Click += btnAnterior_Click;
-            btnPlay.Click += btnPlay_Click;
-            btnPause.Click += btnPause_Click;
-            btnStop.Click += btnStop_Click;
+            btnCargar.Click    += btnCargar_Click;
+            btnAnterior.Click  += btnAnterior_Click;
+            btnPlay.Click      += btnPlay_Click;
+            btnPause.Click     += btnPause_Click;
+            btnStop.Click      += btnStop_Click;
             btnSiguiente.Click += btnSiguiente_Click;
-            lstCanciones.DoubleClick += lstCanciones_DoubleClick;
-            lstCancionesMp3.DoubleClick += lstCancionesMp3_DoubleClick;
+            lstCancionesUnificada.DoubleClick += lstCancionesUnificada_DoubleClick;
+
+            btnModoBarras.Click     += (s, e) => ActualizarModoVisual(0);
+            btnModoOnda.Click       += (s, e) => ActualizarModoVisual(1);
+            btnModoParticulas.Click += (s, e) => ActualizarModoVisual(2);
+            btnModoFiguras.Click    += (s, e) => ActualizarModoVisual(3);
+            btnModoCircular.Click   += (s, e) => ActualizarModoVisual(4);
         }
 
         private void CrearReproductorWindowsMedia()
         {
             try
             {
-                Type tipoReproductor = Type.GetTypeFromProgID("WMPlayer.OCX");
-
-                if (tipoReproductor == null)
-                {
-                    lblEstado.Text = "Estado: Windows Media no disponible";
-                    return;
-                }
-
-                reproductor = Activator.CreateInstance(tipoReproductor);
+                Type tipo = Type.GetTypeFromProgID("WMPlayer.OCX");
+                if (tipo == null) { lblEstado.Text = "Estado: Windows Media no disponible"; return; }
+                reproductor = Activator.CreateInstance(tipo);
                 reproductor.settings.autoStart = false;
                 reproductorDisponible = true;
             }
@@ -153,60 +161,30 @@ namespace ReproductorMusical
             }
         }
 
-        private void CrearBotonPixel(Button boton, Color colorBase, Color colorHover)
-        {
-            boton.BackColor = colorBase;
-            boton.ForeColor = negroSuave;
-            boton.FlatStyle = FlatStyle.Flat;
-            boton.FlatAppearance.BorderColor = negroSuave;
-            boton.FlatAppearance.BorderSize = 3;
-            boton.FlatAppearance.MouseOverBackColor = colorHover;
-            boton.FlatAppearance.MouseDownBackColor = Color.FromArgb(245, 185, 76);
-            boton.ImageAlign = ContentAlignment.MiddleCenter;
-            boton.TextAlign = ContentAlignment.MiddleCenter;
-            boton.TextImageRelation = TextImageRelation.Overlay;
-        }
-
-        private void ConfigurarPanelVisualizador()
-        {
-            ActivarDobleBuffer(panelVisualizador);
-            panelVisualizador.Paint += panelVisualizador_Paint;
-            panelVisualizador.Resize += panelVisualizador_Resize;
-            InicializarParticulas();
-            panelMarcoVisualizador.Invalidate();
-        }
-
         private void ActivarDobleBuffer(Control control)
         {
-            System.Reflection.PropertyInfo propiedad = typeof(Control).GetProperty(
+            System.Reflection.PropertyInfo p = typeof(Control).GetProperty(
                 "DoubleBuffered",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-
-            if (propiedad != null)
-            {
-                propiedad.SetValue(control, true, null);
-            }
+            if (p != null) p.SetValue(control, true, null);
         }
 
+        // ── Canciones ─────────────────────────────────────────────────────────────
         private void CargarCancionesDesdeCarpeta()
         {
-            string carpetaCanciones = ObtenerCarpetaCanciones();
-
-            if (!Directory.Exists(carpetaCanciones))
-            {
-                Directory.CreateDirectory(carpetaCanciones);
-            }
+            string carpeta = ObtenerCarpetaCanciones();
+            if (!Directory.Exists(carpeta)) Directory.CreateDirectory(carpeta);
 
             canciones.Clear();
-            canciones.AddRange(Directory.GetFiles(carpetaCanciones, "*.wav"));
-            canciones.AddRange(Directory.GetFiles(carpetaCanciones, "*.mp3"));
-            canciones.AddRange(Directory.GetFiles(carpetaCanciones, "*.wma"));
-            canciones.AddRange(Directory.GetFiles(carpetaCanciones, "*.mid"));
+            canciones.AddRange(Directory.GetFiles(carpeta, "*.wav"));
+            canciones.AddRange(Directory.GetFiles(carpeta, "*.mp3"));
+            canciones.AddRange(Directory.GetFiles(carpeta, "*.wma"));
+            canciones.AddRange(Directory.GetFiles(carpeta, "*.mid"));
 
             if (canciones.Count > 0)
             {
                 indiceCancionActual = 0;
-                lblCancionActual.Text = "Canción actual: " + Path.GetFileName(canciones[indiceCancionActual]);
+                lblCancionActual.Text = "Canción actual: " + Path.GetFileName(canciones[0]);
                 lblEstado.Text = "Estado: " + canciones.Count + " canción(es) en carpeta";
                 ActualizarListaCanciones();
                 SeleccionarCancionEnLista();
@@ -222,55 +200,71 @@ namespace ReproductorMusical
 
         private string ObtenerCarpetaCanciones()
         {
-            string carpetaDelProyecto = Path.GetFullPath(Path.Combine(Application.StartupPath, @"..\..\Canciones"));
-
-            if (Directory.Exists(carpetaDelProyecto))
-            {
-                return carpetaDelProyecto;
-            }
-
-            return Path.Combine(Application.StartupPath, "Canciones");
+            string carpetaProyecto = Path.GetFullPath(Path.Combine(Application.StartupPath, @"..\..\Canciones"));
+            return Directory.Exists(carpetaProyecto) ? carpetaProyecto : Path.Combine(Application.StartupPath, "Canciones");
         }
 
+        private void ActualizarListaCanciones()
+        {
+            lstCancionesUnificada.BeginUpdate();
+            lstCancionesUnificada.Items.Clear();
+            for (int i = 0; i < canciones.Count; i++)
+            {
+                string ext    = Path.GetExtension(canciones[i]).ToLowerInvariant();
+                string nombre = Path.GetFileNameWithoutExtension(canciones[i]);
+                string tipo   = ext == ".wav" ? "[W]" : "[M]";
+                lstCancionesUnificada.Items.Add((i + 1).ToString("00") + " " + tipo + "  " + nombre);
+            }
+            lstCancionesUnificada.EndUpdate();
+        }
+
+        private void SeleccionarCancionEnLista()
+        {
+            lstCancionesUnificada.ClearSelected();
+            if (indiceCancionActual >= 0 && indiceCancionActual < lstCancionesUnificada.Items.Count)
+                lstCancionesUnificada.SelectedIndex = indiceCancionActual;
+            lstCancionesUnificada.Invalidate();
+        }
+
+        // ── Reproducción ──────────────────────────────────────────────────────────
         private void btnCargar_Click(object sender, EventArgs e)
         {
-            using (OpenFileDialog dialogo = new OpenFileDialog())
+            using (OpenFileDialog dlg = new OpenFileDialog())
             {
-                dialogo.Title = "Cargar canciones";
-                dialogo.Filter = "Archivos de audio|*.mp3;*.wav;*.wma;*.mid|Todos los archivos|*.*";
-                dialogo.Multiselect = true;
+                dlg.Title       = "Cargar canciones";
+                dlg.Filter      = "Archivos de audio|*.mp3;*.wav;*.wma;*.mid|Todos los archivos|*.*";
+                dlg.Multiselect = true;
+                if (dlg.ShowDialog() != DialogResult.OK) return;
 
-                if (dialogo.ShowDialog() != DialogResult.OK)
-                {
-                    return;
-                }
-
-                DetenerTimer();
-                CerrarCancionActual();
-
-                canciones.Clear();
-                canciones.AddRange(dialogo.FileNames);
-                indiceCancionActual = 0;
+                int primera = canciones.Count;
+                foreach (string archivo in dlg.FileNames)
+                    if (!canciones.Contains(archivo)) canciones.Add(archivo);
                 ActualizarListaCanciones();
 
-                AbrirCancionActual();
-                SeleccionarCancionEnLista();
-                lblEstado.Text = cancionAbierta ? "Estado: Canción cargada" : "Estado: No se pudo cargar";
+                if (!cancionAbierta && canciones.Count > 0)
+                {
+                    DetenerTimer();
+                    CerrarCancionActual();
+                    indiceCancionActual = primera;
+                    AbrirCancionActual();
+                    SeleccionarCancionEnLista();
+                    lblEstado.Text = cancionAbierta ? "Estado: Canción cargada" : "Estado: No se pudo cargar";
+                }
+                else
+                {
+                    lblEstado.Text = "Estado: " + dlg.FileNames.Length + " canción(es) agregada(s)";
+                }
             }
         }
 
-        private void btnPlay_Click(object sender, EventArgs e)
-        {
-            Reproducir();
-        }
+        private void btnPlay_Click(object sender, EventArgs e)      { Reproducir(); }
+        private void btnStop_Click(object sender, EventArgs e)      { DetenerReproduccion(); }
+        private void btnAnterior_Click(object sender, EventArgs e)  { CambiarCancion(-1); }
+        private void btnSiguiente_Click(object sender, EventArgs e) { CambiarCancion(1); }
 
         private void btnPause_Click(object sender, EventArgs e)
         {
-            if (!cancionAbierta || !reproduciendo || !reproductorDisponible)
-            {
-                return;
-            }
-
+            if (!cancionAbierta || !reproduciendo || !reproductorDisponible) return;
             if (enPausa)
             {
                 reproductor.controls.play();
@@ -283,212 +277,89 @@ namespace ReproductorMusical
                 enPausa = true;
                 lblEstado.Text = "Estado: Pausado";
             }
+            panelFooter.Invalidate();
         }
 
-        private void btnStop_Click(object sender, EventArgs e)
+        private void lstCancionesUnificada_DoubleClick(object sender, EventArgs e)
         {
-            DetenerReproduccion();
-        }
-
-        private void btnAnterior_Click(object sender, EventArgs e)
-        {
-            CambiarCancion(-1);
-        }
-
-        private void btnSiguiente_Click(object sender, EventArgs e)
-        {
-            CambiarCancion(1);
-        }
-
-        private void lstCanciones_DoubleClick(object sender, EventArgs e)
-        {
-            int indice = ObtenerIndiceCancionPorExtension(".wav", lstCanciones.SelectedIndex);
-
-            if (indice < 0)
-            {
-                return;
-            }
-
+            int idx = lstCancionesUnificada.SelectedIndex;
+            if (idx < 0 || idx >= canciones.Count) return;
             DetenerTimer();
             CerrarCancionActual();
-            indiceCancionActual = indice;
+            indiceCancionActual = idx;
             SeleccionarCancionEnLista();
             AbrirCancionActual();
             Reproducir();
-        }
-
-        private void lstCancionesMp3_DoubleClick(object sender, EventArgs e)
-        {
-            int indice = ObtenerIndiceCancionPorExtension(".mp3", lstCancionesMp3.SelectedIndex);
-
-            if (indice < 0)
-            {
-                return;
-            }
-
-            DetenerTimer();
-            CerrarCancionActual();
-            indiceCancionActual = indice;
-            SeleccionarCancionEnLista();
-            AbrirCancionActual();
-            Reproducir();
-        }
-
-        private void trackVolumen_ValueChanged(object sender, EventArgs e)
-        {
-            ActualizarVolumen();
-            AplicarVolumen();
-        }
-
-        private void timerReproduccion_Tick(object sender, EventArgs e)
-        {
-            if (!cancionAbierta || !reproductorDisponible)
-            {
-                return;
-            }
-
-            int posicion = ObtenerPosicionActualMs();
-            duracionActualMs = ObtenerDuracionActualMs();
-            lblTiempo.Text = FormatearTiempo(posicion) + " / " + FormatearTiempo(duracionActualMs);
-
-            if (reproduciendo && !enPausa && EsFinDeCancion(posicion))
-            {
-                CambiarCancion(1);
-            }
-        }
-
-        private void timerAnimacion_Tick(object sender, EventArgs e)
-        {
-            faseAnimacion += reproduciendo && !enPausa ? 0.13f : 0.035f;
-            ActualizarParticulas();
-            panelVisualizador.Invalidate();
         }
 
         private void Reproducir()
         {
-            if (!reproductorDisponible)
-            {
-                lblEstado.Text = "Estado: Reproductor no disponible";
-                return;
-            }
-
-            if (canciones.Count == 0)
-            {
-                CargarCancionesDesdeCarpeta();
-            }
-
-            if (canciones.Count == 0)
-            {
-                lblEstado.Text = "Estado: Sin canciones";
-                return;
-            }
-
-            if (indiceCancionActual < 0)
-            {
-                indiceCancionActual = 0;
-            }
-
-            if (!cancionAbierta)
-            {
-                AbrirCancionActual();
-            }
-
-            if (!cancionAbierta)
-            {
-                return;
-            }
+            if (!reproductorDisponible) { lblEstado.Text = "Estado: Reproductor no disponible"; return; }
+            if (canciones.Count == 0) CargarCancionesDesdeCarpeta();
+            if (canciones.Count == 0) { lblEstado.Text = "Estado: Sin canciones"; return; }
+            if (indiceCancionActual < 0) indiceCancionActual = 0;
+            if (!cancionAbierta) AbrirCancionActual();
+            if (!cancionAbierta) return;
 
             reproductor.controls.play();
             reproduciendo = true;
             enPausa = false;
             timerReproduccion.Start();
             lblEstado.Text = "Estado: Reproduciendo";
+            panelFooter.Invalidate();
         }
 
         private void DetenerReproduccion()
         {
             if (!cancionAbierta || !reproductorDisponible)
             {
-                lblTiempo.Text = "00:00 / 00:00";
+                panelProgreso.Invalidate();
                 lblEstado.Text = "Estado: Listo";
                 return;
             }
-
             reproductor.controls.stop();
             reproductor.controls.currentPosition = 0;
             reproduciendo = false;
             enPausa = false;
-            lblTiempo.Text = "00:00 / " + FormatearTiempo(duracionActualMs);
+            panelProgreso.Invalidate();
             lblEstado.Text = "Estado: Detenido";
+            panelFooter.Invalidate();
         }
 
         private void CambiarCancion(int direccion)
         {
-            if (canciones.Count == 0)
-            {
-                CargarCancionesDesdeCarpeta();
-            }
-
-            if (canciones.Count == 0)
-            {
-                lblEstado.Text = "Estado: Sin canciones";
-                return;
-            }
+            if (canciones.Count == 0) CargarCancionesDesdeCarpeta();
+            if (canciones.Count == 0) { lblEstado.Text = "Estado: Sin canciones"; return; }
 
             bool reproducirLuego = reproduciendo && !enPausa;
             indiceCancionActual += direccion;
-
-            if (indiceCancionActual < 0)
-            {
-                indiceCancionActual = canciones.Count - 1;
-            }
-            else if (indiceCancionActual >= canciones.Count)
-            {
-                indiceCancionActual = 0;
-            }
+            if (indiceCancionActual < 0)                     indiceCancionActual = canciones.Count - 1;
+            else if (indiceCancionActual >= canciones.Count)  indiceCancionActual = 0;
 
             CerrarCancionActual();
             AbrirCancionActual();
             SeleccionarCancionEnLista();
-
-            if (reproducirLuego)
-            {
-                Reproducir();
-            }
+            if (reproducirLuego) Reproducir();
         }
 
         private void AbrirCancionActual()
         {
-            if (indiceCancionActual < 0 || indiceCancionActual >= canciones.Count)
-            {
-                return;
-            }
-
+            if (indiceCancionActual < 0 || indiceCancionActual >= canciones.Count) return;
             string archivo = canciones[indiceCancionActual];
-
-            if (!File.Exists(archivo))
-            {
-                lblEstado.Text = "Estado: Archivo no encontrado";
-                return;
-            }
-
-            if (!reproductorDisponible)
-            {
-                lblEstado.Text = "Estado: Reproductor no disponible";
-                return;
-            }
+            if (!File.Exists(archivo))       { lblEstado.Text = "Estado: Archivo no encontrado";    return; }
+            if (!reproductorDisponible)      { lblEstado.Text = "Estado: Reproductor no disponible"; return; }
 
             try
             {
                 reproductor.URL = archivo;
                 AplicarVolumen();
-                CargarAnalisisAudio(archivo);
-
-                cancionAbierta = true;
+                analizador.CargarArchivo(archivo);
+                cancionAbierta   = true;
                 duracionActualMs = ObtenerDuracionActualMs();
                 lblCancionActual.Text = "Canción actual: " + Path.GetFileName(archivo);
-                lblTiempo.Text = "00:00 / " + FormatearTiempo(duracionActualMs);
                 SeleccionarCancionEnLista();
+                panelProgreso.Invalidate();
+                panelSelectorVisual.Invalidate();
             }
             catch
             {
@@ -500,789 +371,232 @@ namespace ReproductorMusical
         private void CerrarCancionActual()
         {
             if (reproductorDisponible && reproductor != null)
-            {
-                try
-                {
-                    reproductor.controls.stop();
-                    reproductor.URL = string.Empty;
-                }
-                catch
-                {
-                    // Cierre defensivo del componente de audio.
-                }
-            }
-
-            cancionAbierta = false;
-            reproduciendo = false;
-            enPausa = false;
+                try { reproductor.controls.stop(); reproductor.URL = string.Empty; } catch { }
+            analizador.Limpiar();
+            cancionAbierta   = false;
+            reproduciendo    = false;
+            enPausa          = false;
             duracionActualMs = 0;
-            analisisAudioDisponible = false;
-            muestrasAudio = new float[0];
-            bandasAudio = new float[32];
         }
 
         private void AplicarVolumen()
         {
-            if (reproductorDisponible && reproductor != null)
-            {
-                reproductor.settings.volume = trackVolumen.Value;
-            }
+            if (reproductorDisponible && reproductor != null) reproductor.settings.volume = volumenValor;
         }
 
-        private void ActualizarVolumen()
+        private void ActualizarVolumen() { lblVolumen.Text = "Volumen: " + volumenValor + "%"; }
+
+        private void LiberarReproductor()
         {
-            lblVolumen.Text = "Volumen: " + trackVolumen.Value + "%";
+            if (reproductorDisponible && reproductor != null) try { reproductor.close(); } catch { }
         }
 
-        private void CargarAnalisisAudio(string archivo)
+        private void DetenerTimer() { timerReproduccion.Stop(); }
+
+        // ── Timers ────────────────────────────────────────────────────────────────
+        private void timerReproduccion_Tick(object sender, EventArgs e)
         {
-            analisisAudioDisponible = false;
-            muestrasAudio = new float[0];
-            bandasAudio = new float[32];
-
-            if (Path.GetExtension(archivo).ToLowerInvariant() != ".wav")
-            {
-                return;
-            }
-
-            try
-            {
-                LeerWavPcm16(archivo);
-                analisisAudioDisponible = muestrasAudio.Length > 0;
-            }
-            catch
-            {
-                analisisAudioDisponible = false;
-                muestrasAudio = new float[0];
-            }
+            if (!cancionAbierta || !reproductorDisponible) return;
+            duracionActualMs = ObtenerDuracionActualMs();
+            panelProgreso.Invalidate();
+            if (reproduciendo && !enPausa && EsFinDeCancion(ObtenerPosicionActualMs())) CambiarCancion(1);
         }
 
-        private void LeerWavPcm16(string archivo)
+        private void timerAnimacion_Tick(object sender, EventArgs e)
         {
-            using (BinaryReader lector = new BinaryReader(File.OpenRead(archivo)))
-            {
-                string riff = new string(lector.ReadChars(4));
-                lector.ReadInt32();
-                string wave = new string(lector.ReadChars(4));
+            faseAnimacion += reproduciendo && !enPausa ? 0.13f : 0.035f;
 
-                if (riff != "RIFF" || wave != "WAVE")
-                {
-                    throw new InvalidDataException("El archivo no es WAV RIFF.");
-                }
-
-                short canales = 0;
-                short bitsPorMuestra = 0;
-                short formatoAudio = 0;
-                byte[] datos = null;
-
-                while (lector.BaseStream.Position < lector.BaseStream.Length)
-                {
-                    string chunkId = new string(lector.ReadChars(4));
-                    int chunkSize = lector.ReadInt32();
-
-                    if (chunkId == "fmt ")
-                    {
-                        formatoAudio = lector.ReadInt16();
-                        canales = lector.ReadInt16();
-                        frecuenciaMuestreo = lector.ReadInt32();
-                        lector.ReadInt32();
-                        lector.ReadInt16();
-                        bitsPorMuestra = lector.ReadInt16();
-
-                        if (chunkSize > 16)
-                        {
-                            lector.BaseStream.Position += chunkSize - 16;
-                        }
-                    }
-                    else if (chunkId == "data")
-                    {
-                        datos = lector.ReadBytes(chunkSize);
-                    }
-                    else
-                    {
-                        lector.BaseStream.Position += chunkSize;
-                    }
-                }
-
-                if (formatoAudio != 1 || bitsPorMuestra != 16 || canales <= 0 || datos == null)
-                {
-                    throw new InvalidDataException("Solo se analiza WAV PCM de 16 bits.");
-                }
-
-                int totalFrames = datos.Length / (2 * canales);
-                muestrasAudio = new float[totalFrames];
-
-                for (int frame = 0; frame < totalFrames; frame++)
-                {
-                    int suma = 0;
-
-                    for (int canal = 0; canal < canales; canal++)
-                    {
-                        int indice = (frame * canales + canal) * 2;
-                        short muestra = BitConverter.ToInt16(datos, indice);
-                        suma += muestra;
-                    }
-
-                    muestrasAudio[frame] = (suma / (float)canales) / 32768f;
-                }
-            }
-        }
-
-        private float ObtenerEnergiaAudioReal()
-        {
-            if (!analisisAudioDisponible || muestrasAudio.Length == 0)
-            {
-                return -1f;
-            }
-
-            int posicion = ObtenerIndiceMuestraActual();
-            int ventana = Math.Min(2048, muestrasAudio.Length);
-            int inicio = Math.Max(0, posicion - ventana / 2);
-            int fin = Math.Min(muestrasAudio.Length, inicio + ventana);
-
-            if (fin <= inicio)
-            {
-                return 0f;
-            }
-
-            double sumaCuadrados = 0;
-
-            for (int i = inicio; i < fin; i++)
-            {
-                sumaCuadrados += muestrasAudio[i] * muestrasAudio[i];
-            }
-
-            double rms = Math.Sqrt(sumaCuadrados / (fin - inicio));
-            return Limitar01((float)(rms * 4.5));
-        }
-
-        private float[] ObtenerBandasAudio(int cantidadBandas)
-        {
-            if (!analisisAudioDisponible || muestrasAudio.Length == 0)
-            {
-                return ObtenerBandasMatematicas(cantidadBandas);
-            }
-
-            float[] bandas = new float[cantidadBandas];
-            int posicion = ObtenerIndiceMuestraActual();
-            int ventana = 1024;
-            int inicio = Math.Max(0, posicion - ventana / 2);
-
-            if (inicio + ventana >= muestrasAudio.Length)
-            {
-                inicio = Math.Max(0, muestrasAudio.Length - ventana - 1);
-            }
-
-            for (int banda = 0; banda < cantidadBandas; banda++)
-            {
-                int bin = 2 + banda * 2;
-                double real = 0;
-                double imaginario = 0;
-
-                for (int n = 0; n < ventana && inicio + n < muestrasAudio.Length; n++)
-                {
-                    double ventanaHann = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * n / (ventana - 1));
-                    double muestra = muestrasAudio[inicio + n] * ventanaHann;
-                    double angulo = 2.0 * Math.PI * bin * n / ventana;
-                    real += muestra * Math.Cos(angulo);
-                    imaginario -= muestra * Math.Sin(angulo);
-                }
-
-                double magnitud = Math.Sqrt(real * real + imaginario * imaginario) / ventana;
-                bandas[banda] = Limitar01((float)(magnitud * 18.0));
-            }
-
-            bandasAudio = bandas;
-            return bandas;
-        }
-
-        private float[] ObtenerBandasMatematicas(int cantidadBandas)
-        {
-            float[] bandas = new float[cantidadBandas];
             float energia = ObtenerEnergiaVisual();
+            int   posMs   = cancionAbierta ? ObtenerPosicionActualMs() : 0;
 
-            for (int i = 0; i < cantidadBandas; i++)
+            energiaAnterior = energiaAnterior * 0.94f + energia * 0.06f;
+            float mediaLocal     = Math.Max(0.05f, energiaAnterior);
+            bool  beatTransiente = energia > mediaLocal * 1.40f && energia > 0.18f;
+            if (beatTransiente)
             {
-                double onda = Math.Abs(Math.Sin(faseAnimacion * 1.7 + i * 0.43));
-                double pulso = Math.Abs(Math.Sin(faseAnimacion * 0.55 + i * 0.18));
-                bandas[i] = Limitar01((float)(energia * 0.45 + onda * 0.38 + pulso * 0.22));
+                if (p_beatCooldown > 0) beatTransiente = false;
+                else p_beatCooldown = 4;
             }
+            if (p_beatCooldown > 0) p_beatCooldown--;
 
-            return bandas;
+            contexto.Ancho           = panelVisualizador.Width;
+            contexto.Alto            = panelVisualizador.Height;
+            contexto.FaseAnimacion   = faseAnimacion;
+            contexto.Energia         = energia;
+            contexto.PosicionMs      = posMs;
+            contexto.EnergiaAnterior = energiaAnterior;
+            contexto.BeatTransiente  = beatTransiente;
+
+            if (visualizadorActual != null) visualizadorActual.Actualizar();
+            panelVisualizador.Invalidate();
         }
 
-        private int ObtenerIndiceMuestraActual()
+        // ── Modo de visualización ─────────────────────────────────────────────────
+        private void ActualizarModoVisual(int modo)
         {
-            int posicionMs = ObtenerPosicionActualMs();
-            long indice = (long)posicionMs * frecuenciaMuestreo / 1000;
+            modoVisualActual = modo;
+            Button[] btnsModo = { btnModoBarras, btnModoOnda, btnModoParticulas, btnModoFiguras, btnModoCircular };
+            contextoUI.ModoActivo = btnsModo[Math.Max(0, Math.Min(4, modo))];
+            foreach (Button b in btnsModo) b.Invalidate();
 
-            if (indice < 0)
+            contexto.Ancho = panelVisualizador.Width;
+            contexto.Alto  = panelVisualizador.Height;
+
+            switch (modo)
             {
-                return 0;
+                case 1:  visualizadorActual = new VisualizadorOnda(contexto);        break;
+                case 2:  visualizadorActual = new VisualizadorParticulas(contexto);  break;
+                case 3:  visualizadorActual = new VisualizadorFiguras(contexto);     break;
+                case 4:  visualizadorActual = new VisualizadorCircular(contexto);    break;
+                default: visualizadorActual = new VisualizadorBarras(contexto);      break;
             }
-
-            if (indice >= muestrasAudio.Length)
-            {
-                return Math.Max(0, muestrasAudio.Length - 1);
-            }
-
-            return (int)indice;
+            visualizadorActual.Inicializar();
         }
 
-        private void ActualizarListaCanciones()
+        // ── Helpers de reproducción ───────────────────────────────────────────────
+        private float ObtenerEnergiaVisual()
         {
-            lstCanciones.Items.Clear();
-            lstCancionesMp3.Items.Clear();
-
-            int contadorWav = 1;
-            int contadorMp3 = 1;
-
-            for (int i = 0; i < canciones.Count; i++)
+            float volumen = volumenValor / 100f;
+            if (reproduciendo && !enPausa)
             {
-                string extension = Path.GetExtension(canciones[i]).ToLowerInvariant();
-                string nombre = Path.GetFileNameWithoutExtension(canciones[i]);
-
-                if (extension == ".wav")
-                {
-                    lstCanciones.Items.Add(contadorWav.ToString("00") + "  " + nombre);
-                    contadorWav++;
-                }
-                else if (extension == ".mp3")
-                {
-                    lstCancionesMp3.Items.Add(contadorMp3.ToString("00") + "  " + nombre);
-                    contadorMp3++;
-                }
+                int   posMs      = ObtenerPosicionActualMs();
+                float energiaReal = analizador.ObtenerEnergia(posMs);
+                if (energiaReal >= 0f) return Limitar01(energiaReal * (0.35f + volumen * 0.65f));
             }
-        }
-
-        private void SeleccionarCancionEnLista()
-        {
-            lstCanciones.ClearSelected();
-            lstCancionesMp3.ClearSelected();
-
-            if (indiceCancionActual < 0 || indiceCancionActual >= canciones.Count)
-            {
-                return;
-            }
-
-            string extension = Path.GetExtension(canciones[indiceCancionActual]).ToLowerInvariant();
-
-            if (extension == ".wav")
-            {
-                int indiceWav = ObtenerIndiceFiltrado(".wav", indiceCancionActual);
-
-                if (indiceWav >= 0 && indiceWav < lstCanciones.Items.Count)
-                {
-                    lstCanciones.SelectedIndex = indiceWav;
-                }
-            }
-            else if (extension == ".mp3")
-            {
-                int indiceMp3 = ObtenerIndiceFiltrado(".mp3", indiceCancionActual);
-
-                if (indiceMp3 >= 0 && indiceMp3 < lstCancionesMp3.Items.Count)
-                {
-                    lstCancionesMp3.SelectedIndex = indiceMp3;
-                }
-            }
-        }
-
-        private int ObtenerIndiceCancionPorExtension(string extensionBuscada, int indiceFiltrado)
-        {
-            if (indiceFiltrado < 0)
-            {
-                return -1;
-            }
-
-            int contador = 0;
-
-            for (int i = 0; i < canciones.Count; i++)
-            {
-                if (Path.GetExtension(canciones[i]).ToLowerInvariant() == extensionBuscada)
-                {
-                    if (contador == indiceFiltrado)
-                    {
-                        return i;
-                    }
-
-                    contador++;
-                }
-            }
-
-            return -1;
-        }
-
-        private int ObtenerIndiceFiltrado(string extensionBuscada, int indiceGeneral)
-        {
-            int contador = 0;
-
-            for (int i = 0; i < canciones.Count && i <= indiceGeneral; i++)
-            {
-                if (Path.GetExtension(canciones[i]).ToLowerInvariant() == extensionBuscada)
-                {
-                    if (i == indiceGeneral)
-                    {
-                        return contador;
-                    }
-
-                    contador++;
-                }
-            }
-
-            return -1;
+            if (!reproduciendo || enPausa) return 0.18f + volumen * 0.12f;
+            int    posicion  = ObtenerPosicionActualMs();
+            double tiempo    = posicion / 1000.0;
+            double pulso     = Math.Abs(Math.Sin(tiempo * 2.8));
+            double subPulso  = Math.Abs(Math.Sin(tiempo * 0.9 + Math.Sin(tiempo * 0.35)));
+            return Limitar01((float)((0.28 + pulso * 0.48 + subPulso * 0.24) * volumen));
         }
 
         private int ObtenerPosicionActualMs()
         {
-            try
-            {
-                return (int)(reproductor.controls.currentPosition * 1000);
-            }
-            catch
-            {
-                return 0;
-            }
+            try   { return (int)(reproductor.controls.currentPosition * 1000); }
+            catch { return 0; }
         }
 
         private int ObtenerDuracionActualMs()
         {
-            try
-            {
-                return (int)(reproductor.currentMedia.duration * 1000);
-            }
-            catch
-            {
-                return duracionActualMs;
-            }
+            try   { return (int)(reproductor.currentMedia.duration * 1000); }
+            catch { return duracionActualMs; }
         }
 
         private bool EsFinDeCancion(int posicionMs)
         {
-            try
-            {
-                int estado = reproductor.playState;
-
-                if (estado == 8)
-                {
-                    return true;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-
+            try { if (reproductor.playState == 8) return true; } catch { return false; }
             return duracionActualMs > 0 && posicionMs >= duracionActualMs - 400;
         }
 
-        private string FormatearTiempo(int milisegundos)
-        {
-            if (milisegundos < 0)
-            {
-                milisegundos = 0;
-            }
+        private static float Limitar01(float v) { return v < 0f ? 0f : v > 1f ? 1f : v; }
 
-            TimeSpan tiempo = TimeSpan.FromMilliseconds(milisegundos);
-            return ((int)tiempo.TotalMinutes).ToString("00") + ":" + tiempo.Seconds.ToString("00");
+        // ── Handlers de Paint — cada uno sincroniza el estado y delega ────────────
+        private void panelHeader_Paint(object sender, PaintEventArgs e)
+        {
+            graficoHeader.Dibujar(e.Graphics, panelHeader.Width, panelHeader.Height);
         }
 
-        private void DetenerTimer()
+        private void panelFooter_Paint(object sender, PaintEventArgs e)
         {
-            timerReproduccion.Stop();
+            contextoUI.Reproduciendo = reproduciendo;
+            contextoUI.EnPausa       = enPausa;
+            graficoFooter.Dibujar(e.Graphics, panelFooter.Width, panelFooter.Height);
         }
 
-        private void LiberarReproductor()
+        private void panelProgreso_Paint(object sender, PaintEventArgs e)
         {
-            if (reproductorDisponible && reproductor != null)
-            {
-                try
-                {
-                    reproductor.close();
-                }
-                catch
-                {
-                    // Cierre defensivo del componente COM.
-                }
-            }
+            contextoUI.PosicionMs       = cancionAbierta ? ObtenerPosicionActualMs() : 0;
+            contextoUI.DuracionActualMs = duracionActualMs;
+            graficoProgreso.Dibujar(e.Graphics, panelProgreso.Width, panelProgreso.Height);
+        }
+
+        private void panelVolumen_Paint(object sender, PaintEventArgs e)
+        {
+            contextoUI.VolumenValor = volumenValor;
+            graficoVolumen.Dibujar(e.Graphics, panelVolumen.Width, panelVolumen.Height);
+        }
+
+        private void panelListaCanciones_Paint(object sender, PaintEventArgs e)
+        {
+            graficoLista.DibujarPanel(e.Graphics, panelListaCanciones.Width, panelListaCanciones.Height);
+        }
+
+        private void lstCancionesUnificada_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            contextoUI.IndiceCancionActual = indiceCancionActual;
+            graficoLista.DibujarItem(e);
         }
 
         private void panelMarcoVisualizador_Paint(object sender, PaintEventArgs e)
         {
-            using (Pen bordeClaro = new Pen(mostazaSuave, 4))
-            using (Pen bordeRosa = new Pen(amarilloRetro, 2))
-            using (SolidBrush detalle = new SolidBrush(rojoLadrillo))
-            {
-                Rectangle area = panelMarcoVisualizador.ClientRectangle;
-                area.Inflate(-8, -8);
+            graficoMarco.Dibujar(e.Graphics, panelMarcoVisualizador.Width, panelMarcoVisualizador.Height);
+        }
 
-                e.Graphics.DrawRectangle(bordeClaro, area);
+        private void panelSelectorVisual_Paint(object sender, PaintEventArgs e)
+        {
+            contextoUI.IndiceCancionActual = indiceCancionActual;
+            graficoSelectorVisual.Dibujar(e.Graphics, panelSelectorVisual.Width, panelSelectorVisual.Height);
+        }
 
-                Rectangle segundoBorde = area;
-                segundoBorde.Inflate(-8, -8);
-                e.Graphics.DrawRectangle(bordeRosa, segundoBorde);
-
-                e.Graphics.FillRectangle(detalle, 22, 22, 18, 18);
-                e.Graphics.FillRectangle(detalle, panelMarcoVisualizador.Width - 42, 22, 18, 18);
-                e.Graphics.FillRectangle(detalle, 22, panelMarcoVisualizador.Height - 42, 18, 18);
-                e.Graphics.FillRectangle(detalle, panelMarcoVisualizador.Width - 42, panelMarcoVisualizador.Height - 42, 18, 18);
-            }
+        // ── Visualizador ──────────────────────────────────────────────────────────
+        private void panelVisualizador_Paint(object sender, PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+            e.Graphics.Clear(Color.FromArgb(22, 14, 8));
+            DibujarCuadriculaRetro(e.Graphics);
+            if (visualizadorActual != null) visualizadorActual.Dibujar(e.Graphics);
         }
 
         private void panelVisualizador_Resize(object sender, EventArgs e)
         {
-            InicializarParticulas();
+            contexto.Ancho = panelVisualizador.Width;
+            contexto.Alto  = panelVisualizador.Height;
+            if (visualizadorActual != null) visualizadorActual.AlRedimensionar();
             panelVisualizador.Invalidate();
-        }
-
-        private void panelVisualizador_Paint(object sender, PaintEventArgs e)
-        {
-            e.Graphics.SmoothingMode = SmoothingMode.None;
-            e.Graphics.Clear(Color.FromArgb(1, 82, 98));
-            DibujarCuadriculaRetro(e.Graphics);
-
-            switch (cmbModoVisual.SelectedIndex)
-            {
-                case 1:
-                    DibujarOndaMusical(e.Graphics);
-                    break;
-                case 2:
-                    DibujarParticulas(e.Graphics);
-                    break;
-                case 3:
-                    DibujarFigurasGeometricas(e.Graphics);
-                    break;
-                case 4:
-                    DibujarEspectroCircular(e.Graphics);
-                    break;
-                default:
-                    DibujarBarrasEspectro(e.Graphics);
-                    break;
-            }
         }
 
         private void DibujarCuadriculaRetro(Graphics g)
         {
-            using (Pen linea = new Pen(Color.FromArgb(22, 112, 130), 1))
+            int w = panelVisualizador.Width;
+            int h = panelVisualizador.Height;
+            for (int borde = 0; borde < 18; borde++)
             {
-                for (int x = 0; x < panelVisualizador.Width; x += 24)
-                {
-                    g.DrawLine(linea, x, 0, x, panelVisualizador.Height);
-                }
-
-                for (int y = 0; y < panelVisualizador.Height; y += 24)
-                {
-                    g.DrawLine(linea, 0, y, panelVisualizador.Width, y);
-                }
+                int alfa = (int)((1.0 - borde / 18.0) * 60);
+                using (Pen vig = new Pen(Color.FromArgb(alfa, 0, 0, 0), 1))
+                    g.DrawRectangle(vig, borde, borde, w - borde * 2 - 1, h - borde * 2 - 1);
             }
+            using (Pen lineaGrilla = new Pen(Color.FromArgb(22, 140, 80, 20), 1))
+                for (int y = 14; y < h - 6; y += 20)
+                    g.DrawLine(lineaGrilla, 8, y, w - 8, y);
+            using (SolidBrush perforacion = new SolidBrush(Color.FromArgb(35, 80, 45, 8)))
+                for (int y = 14; y < h - 6; y += 20)
+                    for (int x = 22; x < w - 6; x += 30)
+                        g.FillEllipse(perforacion, x - 4, y + 7, 7, 7);
         }
 
-        private void DibujarBarrasEspectro(Graphics g)
+        // ── Volumen (slider personalizado) ────────────────────────────────────────
+        private void panelVolumen_Mouse(object sender, MouseEventArgs e)
         {
-            int ancho = Math.Max(1, panelVisualizador.Width);
-            int alto = Math.Max(1, panelVisualizador.Height);
-            int cantidadBarras = 32;
-            int separacion = 5;
-            int anchoBarra = Math.Max(6, (ancho - 48 - (cantidadBarras - 1) * separacion) / cantidadBarras);
-            int inicioX = 24;
-            float energia = ObtenerEnergiaVisual();
-            float[] bandas = ObtenerBandasAudio(cantidadBarras);
-
-            for (int i = 0; i < cantidadBarras; i++)
-            {
-                int altura = (int)(24 + bandas[i] * (alto - 72) + energia * 38);
-                altura = Math.Min(alto - 38, altura);
-
-                int x = inicioX + i * (anchoBarra + separacion);
-                int y = alto - altura - 24;
-                Color color = Color.FromArgb(
-                    245,
-                    Mezclar(160, 230, i / (float)cantidadBarras),
-                    Mezclar(4, 96, energia));
-
-                using (SolidBrush relleno = new SolidBrush(color))
-                using (Pen borde = new Pen(negroSuave, 2))
-                {
-                    g.FillRectangle(relleno, x, y, anchoBarra, altura);
-                    g.DrawRectangle(borde, x, y, anchoBarra, altura);
-                }
-            }
+            if (e.Button != MouseButtons.Left) return;
+            int margin = 8, trackLen = panelVolumen.Width - margin * 2;
+            float pos = (e.X - margin) / (float)trackLen;
+            volumenValor = Math.Max(0, Math.Min(100, (int)(pos * 100 + 0.5f)));
+            ActualizarVolumen();
+            AplicarVolumen();
+            panelVolumen.Invalidate();
         }
 
-        private void DibujarOndaMusical(Graphics g)
+        // ── Progreso: clic para saltar a posición ─────────────────────────────────
+        private void panelProgreso_MouseDown(object sender, MouseEventArgs e)
         {
-            int ancho = Math.Max(1, panelVisualizador.Width);
-            int alto = Math.Max(1, panelVisualizador.Height);
-            float energia = ObtenerEnergiaVisual();
-            int centroY = alto / 2;
-            int centroX = ancho / 2;
-            int muestras = 104;
-            int paso = Math.Max(5, (ancho - 56) / muestras);
-            float[] bandas = ObtenerBandasAudio(muestras);
-
-            using (Pen lineaCentro = new Pen(Color.FromArgb(70, cremaRetro), 1))
-            using (SolidBrush punto = new SolidBrush(cremaRetro))
-            using (SolidBrush acento = new SolidBrush(amarilloRetro))
-            {
-                g.DrawLine(lineaCentro, 24, centroY, ancho - 24, centroY);
-
-                for (int i = 0; i < muestras; i++)
-                {
-                    int x = 28 + i * paso;
-                    double distanciaNormal = Math.Abs((x - centroX) / (double)Math.Max(1, centroX));
-                    double envolvente = Math.Exp(-distanciaNormal * 3.1);
-                    double pulsoLocal = 0.65 + 0.35 * Math.Abs(Math.Sin(faseAnimacion * 0.85 + i * 0.11));
-                    int amplitud = (int)((10 + bandas[i] * 96 + energia * 30) * envolvente * pulsoLocal);
-                    int tamanoPunto = amplitud > 12 ? 5 : 4;
-
-                    if (amplitud > 8)
-                    {
-                        g.FillRectangle(acento, x - 2, centroY - amplitud, 4, amplitud * 2);
-                    }
-
-                    g.FillEllipse(punto, x - tamanoPunto / 2, centroY - tamanoPunto / 2, tamanoPunto, tamanoPunto);
-                }
-            }
-        }
-
-        private void DibujarEspectroCircular(Graphics g)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            int ancho = Math.Max(1, panelVisualizador.Width);
-            int alto = Math.Max(1, panelVisualizador.Height);
-            int centroX = ancho / 2;
-            int centroY = alto / 2;
-            int radioBase = Math.Min(ancho, alto) / 5;
-            int cantidadLineas = 96;
-            float energia = ObtenerEnergiaVisual();
-            float[] bandas = ObtenerBandasAudio(cantidadLineas);
-
-            using (Pen anillo = new Pen(Color.FromArgb(140, cremaRetro), 2))
-            using (Pen puntoAnillo = new Pen(Color.FromArgb(160, amarilloRetro), 2))
-            {
-                g.DrawEllipse(anillo, centroX - radioBase, centroY - radioBase, radioBase * 2, radioBase * 2);
-
-                for (int i = 0; i < cantidadLineas; i++)
-                {
-                    double angulo = (Math.PI * 2 * i / cantidadLineas) - Math.PI / 2;
-                    double envolvente = 0.45 + 0.55 * Math.Abs(Math.Sin(angulo * 2.0 + faseAnimacion * 0.35));
-                    int largo = (int)((10 + bandas[i] * 120 + energia * 25) * envolvente);
-
-                    int x1 = centroX + (int)(Math.Cos(angulo) * radioBase);
-                    int y1 = centroY + (int)(Math.Sin(angulo) * radioBase);
-                    int x2 = centroX + (int)(Math.Cos(angulo) * (radioBase + largo));
-                    int y2 = centroY + (int)(Math.Sin(angulo) * (radioBase + largo));
-
-                    Color colorLinea = i % 4 == 0 ? amarilloRetro : Color.FromArgb(89, 229, 128);
-                    using (Pen barra = new Pen(colorLinea, i % 6 == 0 ? 3 : 2))
-                    {
-                        g.DrawLine(barra, x1, y1, x2, y2);
-                    }
-
-                    if (i % 3 == 0)
-                    {
-                        g.DrawEllipse(puntoAnillo, x1 - 1, y1 - 1, 2, 2);
-                    }
-                }
-            }
-        }
-
-        private void DibujarParticulas(Graphics g)
-        {
-            float energia = ObtenerEnergiaVisual();
-
-            foreach (ParticulaVisual particula in particulas)
-            {
-                int tamano = (int)(particula.Tamano + energia * 10);
-                Color color = Color.FromArgb(
-                    particula.Alfa,
-                    particula.ColorBase.R,
-                    particula.ColorBase.G,
-                    particula.ColorBase.B);
-
-                using (SolidBrush relleno = new SolidBrush(color))
-                using (Pen borde = new Pen(negroSuave, 1))
-                {
-                    Rectangle rect = new Rectangle((int)particula.X, (int)particula.Y, tamano, tamano);
-                    g.FillRectangle(relleno, rect);
-                    g.DrawRectangle(borde, rect);
-                }
-            }
-        }
-
-        private void DibujarFigurasGeometricas(Graphics g)
-        {
-            int ancho = Math.Max(1, panelVisualizador.Width);
-            int alto = Math.Max(1, panelVisualizador.Height);
-            float energia = ObtenerEnergiaVisual();
-            int centroX = ancho / 2;
-            int centroY = alto / 2;
-
-            for (int i = 0; i < 8; i++)
-            {
-                double angulo = faseAnimacion * 0.75 + i * Math.PI / 4;
-                int distancia = (int)(58 + energia * 110 + i * 12);
-                int x = centroX + (int)(Math.Cos(angulo) * distancia);
-                int y = centroY + (int)(Math.Sin(angulo) * distancia);
-                int tamano = (int)(26 + energia * 28 + Math.Sin(faseAnimacion + i) * 8);
-
-                Color color = i % 3 == 0 ? amarilloRetro : (i % 3 == 1 ? mostazaSuave : rojoLadrillo);
-                using (SolidBrush relleno = new SolidBrush(color))
-                using (Pen borde = new Pen(negroSuave, 3))
-                {
-                    Rectangle rect = new Rectangle(x - tamano / 2, y - tamano / 2, tamano, tamano);
-
-                    if (i % 2 == 0)
-                    {
-                        g.FillRectangle(relleno, rect);
-                        g.DrawRectangle(borde, rect);
-                    }
-                    else
-                    {
-                        g.FillEllipse(relleno, rect);
-                        g.DrawEllipse(borde, rect);
-                    }
-                }
-            }
-
-            DibujarViniloCentral(g, centroX, centroY, energia);
-        }
-
-        private void DibujarViniloCentral(Graphics g, int centroX, int centroY, float energia)
-        {
-            int radio = (int)(62 + energia * 30);
-            Rectangle disco = new Rectangle(centroX - radio, centroY - radio, radio * 2, radio * 2);
-            Rectangle centro = new Rectangle(centroX - 14, centroY - 14, 28, 28);
-
-            using (SolidBrush discoBrush = new SolidBrush(negroSuave))
-            using (SolidBrush centroBrush = new SolidBrush(amarilloRetro))
-            using (Pen surco = new Pen(Color.FromArgb(55, 65, 74), 2))
-            {
-                g.FillEllipse(discoBrush, disco);
-
-                for (int r = 18; r < radio; r += 14)
-                {
-                    g.DrawEllipse(surco, centroX - r, centroY - r, r * 2, r * 2);
-                }
-
-                g.FillEllipse(centroBrush, centro);
-            }
-        }
-
-        private void InicializarParticulas()
-        {
-            particulas.Clear();
-
-            int ancho = Math.Max(1, panelVisualizador.Width);
-            int alto = Math.Max(1, panelVisualizador.Height);
-
-            for (int i = 0; i < 46; i++)
-            {
-                Color color = i % 3 == 0 ? amarilloRetro : (i % 3 == 1 ? mostazaSuave : cremaRetro);
-                particulas.Add(new ParticulaVisual(
-                    aleatorio.Next(ancho),
-                    aleatorio.Next(alto),
-                    (float)(aleatorio.NextDouble() * 2.4 - 1.2),
-                    (float)(aleatorio.NextDouble() * 2.4 - 1.2),
-                    aleatorio.Next(5, 13),
-                    aleatorio.Next(120, 230),
-                    color));
-            }
-        }
-
-        private void ActualizarParticulas()
-        {
-            if (particulas.Count == 0 || panelVisualizador.Width <= 0 || panelVisualizador.Height <= 0)
-            {
-                return;
-            }
-
-            float energia = ObtenerEnergiaVisual();
-
-            foreach (ParticulaVisual particula in particulas)
-            {
-                particula.X += particula.VelocidadX * (1.0f + energia * 2.3f);
-                particula.Y += particula.VelocidadY * (1.0f + energia * 2.3f);
-
-                if (particula.X < 0 || particula.X > panelVisualizador.Width - particula.Tamano)
-                {
-                    particula.VelocidadX *= -1;
-                }
-
-                if (particula.Y < 0 || particula.Y > panelVisualizador.Height - particula.Tamano)
-                {
-                    particula.VelocidadY *= -1;
-                }
-            }
-        }
-
-        private float ObtenerEnergiaVisual()
-        {
-            float volumen = trackVolumen.Value / 100f;
-
-            if (reproduciendo && !enPausa)
-            {
-                float energiaReal = ObtenerEnergiaAudioReal();
-
-                if (energiaReal >= 0f)
-                {
-                    return Limitar01(energiaReal * (0.35f + volumen * 0.65f));
-                }
-            }
-
-            if (!reproduciendo || enPausa)
-            {
-                return 0.18f + volumen * 0.12f;
-            }
-
-            int posicion = ObtenerPosicionActualMs();
-            double tiempo = posicion / 1000.0;
-            double pulso = Math.Abs(Math.Sin(tiempo * 2.8));
-            double subPulso = Math.Abs(Math.Sin(tiempo * 0.9 + Math.Sin(tiempo * 0.35)));
-            return Limitar01((float)((0.28 + pulso * 0.48 + subPulso * 0.24) * volumen));
-        }
-
-        private int Mezclar(int inicio, int fin, float cantidad)
-        {
-            cantidad = Limitar01(cantidad);
-            return inicio + (int)((fin - inicio) * cantidad);
-        }
-
-        private float Limitar01(float valor)
-        {
-            if (valor < 0f)
-            {
-                return 0f;
-            }
-
-            if (valor > 1f)
-            {
-                return 1f;
-            }
-
-            return valor;
-        }
-
-        private class ParticulaVisual
-        {
-            public float X;
-            public float Y;
-            public float VelocidadX;
-            public float VelocidadY;
-            public int Tamano;
-            public int Alfa;
-            public Color ColorBase;
-
-            public ParticulaVisual(float x, float y, float velocidadX, float velocidadY, int tamano, int alfa, Color colorBase)
-            {
-                X = x;
-                Y = y;
-                VelocidadX = velocidadX;
-                VelocidadY = velocidadY;
-                Tamano = tamano;
-                Alfa = alfa;
-                ColorBase = colorBase;
-            }
+            if (!cancionAbierta || !reproductorDisponible || duracionActualMs <= 0) return;
+            const int labelW = 80;
+            int barX = labelW + 10, barW = panelProgreso.Width - labelW * 2 - 20;
+            if (e.X < barX || e.X > barX + barW) return;
+            float pos = (e.X - barX) / (float)barW;
+            try { reproductor.controls.currentPosition = pos * (duracionActualMs / 1000.0); } catch { }
+            panelProgreso.Invalidate();
         }
     }
 }

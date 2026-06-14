@@ -46,13 +46,32 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AnalizadorAudio.cs" />
+    <Compile Include="Graficos\ContextoUI.cs" />
+    <Compile Include="Graficos\GraficoBotones.cs" />
+    <Compile Include="Graficos\GraficoFooter.cs" />
+    <Compile Include="Graficos\GraficoHeader.cs" />
+    <Compile Include="Graficos\GraficoLista.cs" />
+    <Compile Include="Graficos\GraficoMarco.cs" />
+    <Compile Include="Graficos\GraficoProgreso.cs" />
+    <Compile Include="Graficos\GraficoSelectorVisual.cs" />
+    <Compile Include="Graficos\GraficoVolumen.cs" />
     <Compile Include="Michimusic.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="Michimusic.Designer.cs">
       <DependentUpon>Michimusic.cs</DependentUpon>
     </Compile>
+    <Compile Include="Modelos\AnilloOnda.cs" />
+    <Compile Include="Modelos\ParticulaVisual.cs" />
     <Compile Include="Program.cs" />
+    <Compile Include="Visualizadores\ContextoVisualizacion.cs" />
+    <Compile Include="Visualizadores\VisualizadorBarras.cs" />
+    <Compile Include="Visualizadores\VisualizadorBase.cs" />
+    <Compile Include="Visualizadores\VisualizadorCircular.cs" />
+    <Compile Include="Visualizadores\VisualizadorFiguras.cs" />
+    <Compile Include="Visualizadores\VisualizadorOnda.cs" />
+    <Compile Include="Visualizadores\VisualizadorParticulas.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Michimusic.resx">
       <DependentUpon>Michimusic.cs</DependentUpon>
@@ -82,7 +101,17 @@
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
+    <Content Include="Canciones\A Winter%27s Ball.mp3" />
+    <Content Include="Canciones\AlbumArtSmall.jpg" />
+    <Content Include="Canciones\Blink Gone %28VIVINOS - ALNST Original Soundtrack Part.8%29.mp3" />
     <Content Include="Canciones\Bloom.mp3" />
+    <Content Include="Canciones\Bloom.wav" />
+    <Content Include="Canciones\Chicago - Michael Jackson.wav" />
+    <Content Include="Canciones\Folder.jpg" />
+    <Content Include="Canciones\Guns and Ships - Original Broadway Cast Recording [l0sG7QJ2aO8].mp3" />
+    <Content Include="Canciones\Michael Jackson - Chicago %28Official Audio%29.mp3" />
+    <Content Include="Canciones\SCYLLA  Epic_ The Musical  The Animatic %28Student Project%29.mp3" />
+    <Content Include="Canciones\VOX POPULI %28LUCIFER%27S PART%29  AN OC ANIMATIC  CW VIOLENCE.mp3" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
